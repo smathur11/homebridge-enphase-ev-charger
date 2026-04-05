@@ -1,0 +1,49 @@
+{
+  "displayName": "Enphase EV Charger",
+  "name": "homebridge-enphase-ev-charger",
+  "version": "0.4.1",
+  "description": "Focused Homebridge plugin for the Enphase IQ EV charger.",
+  "license": "MIT",
+  "author": "Sanjay Mathur",
+  "homepage": "https://github.com/smathur11/homebridge-enphase-ev-charger#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/smathur11/homebridge-enphase-ev-charger.git"
+  },
+  "bugs": {
+    "url": "https://github.com/smathur11/homebridge-enphase-ev-charger/issues"
+  },
+  "type": "module",
+  "exports": {
+    ".": "./index.js"
+  },
+  "files": [
+    "src",
+    "docs",
+    "index.js",
+    "config.schema.json",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "engines": {
+    "homebridge": "^1.8.0 || ^2.0.0 || ^2.0.0-beta.79 || ^2.0.0-alpha.81",
+    "node": "^20 || ^22 || ^24 || ^25"
+  },
+  "dependencies": {
+    "axios": "^1.13.6",
+    "mqtt": "^5.14.1",
+    "protobufjs": "^7.5.4"
+  },
+  "keywords": [
+    "homebridge",
+    "homebridge-plugin",
+    "enphase",
+    "ev",
+    "charger",
+    "evse"
+  ],
+  "scripts": {
+    "test": "node --check index.js && node --check src/platform.js && node --check src/accessory.js && node --check src/client.js && node --check src/custom-characteristics.js"
+  }
+}

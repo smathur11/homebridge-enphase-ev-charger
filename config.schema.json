@@ -1,0 +1,70 @@
+{
+  "pluginAlias": "EnphaseEvCharger",
+  "pluginType": "platform",
+  "singular": true,
+  "headerDisplay": "Focused Enphase IQ EV charger plugin with homeowner login, charger autodiscovery, Apple Home switch control, an optional charging-status sensor, and an optional estimated power sensor.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "title": "Accessory Name",
+        "type": "string",
+        "default": "Enphase EV Charger"
+      },
+      "gatewayHost": {
+        "title": "Gateway Host",
+        "type": "string",
+        "default": "192.168.0.205"
+      },
+      "gatewaySerial": {
+        "title": "Gateway Serial (optional)",
+        "type": "string"
+      },
+      "systemId": {
+        "title": "Enphase System ID",
+        "type": "string"
+      },
+      "chargerSerial": {
+        "title": "EV Charger Serial (optional)",
+        "type": "string"
+      },
+      "enlightenUser": {
+        "title": "Enphase Username",
+        "type": "string"
+      },
+      "enlightenPasswd": {
+        "title": "Enphase Password",
+        "type": "string"
+      },
+      "exposeChargingStatusSensor": {
+        "title": "Expose Charging Status Sensor",
+        "type": "boolean",
+        "default": true
+      },
+      "exposeChargingPowerSensor": {
+        "title": "Expose Estimated Charging Power Sensor (Light Level)",
+        "type": "boolean",
+        "default": false
+      },
+      "pollIntervalSeconds": {
+        "title": "Poll Interval (seconds)",
+        "type": "integer",
+        "default": 30,
+        "minimum": 10
+      },
+      "chargingLevel": {
+        "title": "Charge Current Limit (A)",
+        "type": "integer",
+        "default": 48,
+        "minimum": 6,
+        "maximum": 100
+      },
+      "connectorId": {
+        "title": "Connector ID",
+        "type": "integer",
+        "default": 1,
+        "minimum": 1
+      }
+    }
+  }
+}
