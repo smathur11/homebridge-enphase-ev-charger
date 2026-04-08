@@ -4,7 +4,14 @@ import {
   EnphaseEvChargingPowerAccessory,
   EnphaseEvChargingStatusAccessory
 } from './accessory.js';
-import { DEFAULT_POLL_INTERVAL_SECONDS, PLATFORM_NAME, PLUGIN_NAME } from './constants.js';
+import {
+  DEFAULT_CHARGING_POLL_INTERVAL_SECONDS,
+  DEFAULT_IDLE_POLL_INTERVAL_SECONDS,
+  DEFAULT_PLUGGED_IN_POLL_INTERVAL_SECONDS,
+  DEFAULT_POLL_INTERVAL_SECONDS,
+  PLATFORM_NAME,
+  PLUGIN_NAME
+} from './constants.js';
 
 export class EnphaseEvChargerPlatform {
   constructor(log, config, api) {
@@ -18,6 +25,8 @@ export class EnphaseEvChargerPlatform {
       powerWatts: 0,
       sessionState: 'unknown'
     };
+    this.refreshTimer = null;
+    this.refreshInFlight = false;
 
     if (!config) {
       this.log.warn('No configuration found for Enphase EV Charger.');
@@ -101,12 +110,8 @@ export class EnphaseEvChargerPlatform {
       this.evChargingPowerAccessory = new EnphaseEvChargingPowerAccessory(this, powerAccessory);
     }
 
-    await this.refreshAccessories();
-
-    const pollIntervalSeconds = Math.max(10, Number(this.config.pollIntervalSeconds || DEFAULT_POLL_INTERVAL_SECONDS));
-    setInterval(() => {
-      void this.refreshAccessories();
-    }, pollIntervalSeconds * 1000);
+    await this.refreshAccessories({ scheduleNext: false });
+    this.scheduleNextRefresh();
   }
 
   getOrCreateAccessory(platformAccessory, name, uuid) {
@@ -175,12 +180,67 @@ export class EnphaseEvChargerPlatform {
     }
   }
 
-  async refreshAccessories() {
+  getPollIntervals() {
+    const legacyPollInterval = Number(this.config.pollIntervalSeconds || DEFAULT_POLL_INTERVAL_SECONDS);
+    return {
+      idle: Math.max(60, Number(this.config.idlePollIntervalSeconds || DEFAULT_IDLE_POLL_INTERVAL_SECONDS)),
+      pluggedIn: Math.max(30, Number(this.config.pluggedInPollIntervalSeconds || DEFAULT_PLUGGED_IN_POLL_INTERVAL_SECONDS)),
+      charging: Math.max(
+        10,
+        Number(this.config.chargingPollIntervalSeconds || legacyPollInterval || DEFAULT_CHARGING_POLL_INTERVAL_SECONDS)
+      )
+    };
+  }
+
+  getNextPollIntervalSeconds() {
+    const intervals = this.getPollIntervals();
+    if (this.lastKnownState.active || this.lastKnownState.enabled || this.lastKnownState.sessionState === 'charging') {
+      return intervals.charging;
+    }
+
+    if (this.isPluggedInSessionState(this.lastKnownState.sessionState)) {
+      return intervals.pluggedIn;
+    }
+
+    return intervals.idle;
+  }
+
+  isPluggedInSessionState(sessionState) {
+    const normalized = String(sessionState || '').toLowerCase();
+    return normalized !== ''
+      && normalized !== 'unknown'
+      && normalized !== 'idle'
+      && normalized !== 'available'
+      && normalized !== 'unavailable';
+  }
+
+  scheduleNextRefresh(delaySeconds = this.getNextPollIntervalSeconds()) {
+    if (this.refreshTimer) {
+      clearTimeout(this.refreshTimer);
+    }
+
+    this.refreshTimer = setTimeout(() => {
+      this.refreshTimer = null;
+      void this.refreshAccessories();
+    }, delaySeconds * 1000);
+  }
+
+  async refreshAccessories({ scheduleNext = true } = {}) {
+    if (this.refreshInFlight) {
+      return;
+    }
+
+    this.refreshInFlight = true;
     try {
       const state = await this.client.getChargerState();
       this.applySharedState(state);
     } catch (error) {
       this.log.warn(`Charger state refresh failed: ${error.message || error}`);
+    } finally {
+      this.refreshInFlight = false;
+      if (scheduleNext) {
+        this.scheduleNextRefresh();
+      }
     }
   }
 }

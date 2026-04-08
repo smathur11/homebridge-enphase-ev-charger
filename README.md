@@ -15,7 +15,7 @@ The plugin can expose the charger switch plus optional Apple Home sensors for ch
 
 ## Current state
 
-Current test milestone: `v0.4.1`
+Current test milestone: `v0.4.2`
 
 This workspace is now partly wired to the real Enlighten homeowner web app.
 
@@ -77,9 +77,11 @@ In `enlighten-web` mode, the plugin can discover:
   "enlightenPasswd": "your-password",
   "exposeChargingStatusSensor": true,
   "exposeChargingPowerSensor": false,
+  "idlePollIntervalSeconds": 300,
+  "pluggedInPollIntervalSeconds": 60,
+  "chargingPollIntervalSeconds": 30,
   "chargingLevel": 48,
-  "connectorId": 1,
-  "pollIntervalSeconds": 30
+  "connectorId": 1
 }
 ```
 
@@ -92,6 +94,7 @@ In `enlighten-web` mode:
 - `Off` stops charging via `PUT /service/evse_controller/{systemId}/ev_chargers/{chargerSerial}/stop_charging`
 - state polling uses `GET /service/evse_controller/{systemId}/ev_chargers/status`
 - current status includes plugged-in and charging state
+- state polling is adaptive: slow while idle, moderate while plugged in, and faster while actively charging
 - estimated live charging power is derived from the site-load livestream and a pre-charge baseline
 - `chargingLevel` is automatically clamped to the charger's discovered maximum if your config exceeds it
 - Apple Home always gets:
@@ -101,6 +104,15 @@ In `enlighten-web` mode:
   - a `Light Sensor` named `Estimated EV Charging Power`
 - the contact sensor is `open` while the car is actively charging and `closed` while it is not charging
 - the power sensor reports lux equal to watts, so `3800 lux` means about `3800 W`
+
+Adaptive polling defaults:
+
+- idle / unplugged: every `300` seconds
+- plugged in but not charging: every `60` seconds
+- actively charging: every `30` seconds
+- after Apple Home start/stop commands: short burst refreshes at `5`, `15`, `30`, and `60` seconds
+
+The older `pollIntervalSeconds` setting is still accepted as a fallback for the charging poll interval, but new installs should prefer the three state-specific polling settings.
 
 HomeKit accessory details:
 

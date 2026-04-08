@@ -2,7 +2,7 @@
   "pluginAlias": "EnphaseEvCharger",
   "pluginType": "platform",
   "singular": true,
-  "headerDisplay": "Focused Enphase IQ EV charger plugin with homeowner login, charger autodiscovery, Apple Home switch control, an optional charging-status sensor, and an optional estimated power sensor.",
+  "headerDisplay": "Focused Enphase IQ EV charger plugin with homeowner login, charger autodiscovery, Apple Home switch control, optional charging-status and estimated-power sensors, and adaptive polling.",
   "schema": {
     "type": "object",
     "properties": {
@@ -47,7 +47,25 @@
         "default": false
       },
       "pollIntervalSeconds": {
-        "title": "Poll Interval (seconds)",
+        "title": "Legacy Poll Interval / Charging Poll Interval (seconds)",
+        "type": "integer",
+        "default": 30,
+        "minimum": 10
+      },
+      "idlePollIntervalSeconds": {
+        "title": "Idle Poll Interval (seconds)",
+        "type": "integer",
+        "default": 300,
+        "minimum": 60
+      },
+      "pluggedInPollIntervalSeconds": {
+        "title": "Plugged-In Poll Interval (seconds)",
+        "type": "integer",
+        "default": 60,
+        "minimum": 30
+      },
+      "chargingPollIntervalSeconds": {
+        "title": "Charging Poll Interval (seconds)",
         "type": "integer",
         "default": 30,
         "minimum": 10
