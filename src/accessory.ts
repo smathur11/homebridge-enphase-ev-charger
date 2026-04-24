@@ -1,6 +1,8 @@
 import { getCustomCharacteristics } from './custom-characteristics.js';
 
 class EnphaseBaseAccessory {
+  [key: string]: any;
+
   constructor(platform, accessory, displayName) {
     this.platform = platform;
     this.log = platform.log;
@@ -23,6 +25,7 @@ class EnphaseBaseAccessory {
 
     this.chargingEnabled = false;
     this.chargingActive = false;
+    this.pluggedIn = false;
     this.powerWatts = 0;
     this.sessionState = 'unknown';
   }
@@ -30,6 +33,7 @@ class EnphaseBaseAccessory {
   applyState(state) {
     this.chargingEnabled = Boolean(state.enabled);
     this.chargingActive = Boolean(state.active);
+    this.pluggedIn = Boolean(state.pluggedIn);
     this.powerWatts = Number.isFinite(state.powerWatts) ? state.powerWatts : 0;
     this.sessionState = state.sessionState || 'unknown';
     this.updateAccessoryInformation();

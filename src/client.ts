@@ -137,6 +137,8 @@ const LIVESTREAM_PROTO_JSON = {
 };
 
 export class EnphaseChargerClient {
+  [key: string]: any;
+
   constructor(log, config) {
     this.log = log;
     this.config = config;
@@ -196,6 +198,7 @@ export class EnphaseChargerClient {
       enabled: Boolean(config.mockEnabled),
       active: Boolean(config.mockActive),
       powerWatts: Number.isFinite(config.mockPowerWatts) ? config.mockPowerWatts : 0,
+      pluggedIn: Boolean(config.mockEnabled) || Boolean(config.mockActive),
       sessionState: config.mockSessionState || 'idle'
     };
   }
@@ -225,28 +228,34 @@ export class EnphaseChargerClient {
     loginForm.append('user[email]', this.enlightenUser);
     loginForm.append('user[password]', this.enlightenPasswd);
 
-    const loginResponse = await axios.post(`${ENLIGHTEN_BASE_URL}/login/login.json`, loginForm, {
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
-      timeout: 30000
-    });
+    const loginResponse = await this.withTransientRetry(
+      () => axios.post(`${ENLIGHTEN_BASE_URL}/login/login.json`, loginForm, {
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        timeout: 30000
+      }),
+      'Enlighten login'
+    );
 
     const cookies = loginResponse.headers['set-cookie'];
     if (!cookies?.length) {
       throw new Error('Enlighten login succeeded but no session cookie was returned.');
     }
 
-    const tokenResponse = await axios.post(`${ENTREZ_BASE_URL}/tokens`, {
-      serial_num: this.gatewaySerial
-    }, {
-      headers: {
-        Accept: 'application/json',
-        Cookie: cookies.join('; ')
-      },
-      timeout: 30000
-    });
+    const tokenResponse = await this.withTransientRetry(
+      () => axios.post(`${ENTREZ_BASE_URL}/tokens`, {
+        serial_num: this.gatewaySerial
+      }, {
+        headers: {
+          Accept: 'application/json',
+          Cookie: cookies.join('; ')
+        },
+        timeout: 30000
+      }),
+      'Entrez token request'
+    );
 
     const token = tokenResponse.data?.token;
     if (!token) {
@@ -272,13 +281,16 @@ export class EnphaseChargerClient {
     loginForm.append('user[email]', this.enlightenUser);
     loginForm.append('user[password]', this.enlightenPasswd);
 
-    const loginResponse = await axios.post(`${ENLIGHTEN_BASE_URL}/login/login.json`, loginForm, {
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
-      timeout: 30000
-    });
+    const loginResponse = await this.withTransientRetry(
+      () => axios.post(`${ENLIGHTEN_BASE_URL}/login/login.json`, loginForm, {
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        timeout: 30000
+      }),
+      'Enlighten web login'
+    );
 
     const cookies = loginResponse.headers['set-cookie'];
     if (!cookies?.length) {
@@ -343,15 +355,18 @@ export class EnphaseChargerClient {
   async getStateViaEnlightenWeb() {
     await this.ensureDiscoveredIdentifiers();
 
-    const response = await axios.get(
-      `${ENLIGHTEN_BASE_URL}/service/evse_controller/${this.systemId}/ev_chargers/status`,
-      {
-        headers: this.buildEnlightenWebHeaders({
-          Accept: '*/*',
-          'Content-Type': 'application/json'
-        }),
-        timeout: 30000
-      }
+    const response = await this.requestWithWebSessionRefresh(
+      () => axios.get(
+        `${ENLIGHTEN_BASE_URL}/service/evse_controller/${this.systemId}/ev_chargers/status`,
+        {
+          headers: this.buildEnlightenWebHeaders({
+            Accept: '*/*',
+            'Content-Type': 'application/json'
+          }),
+          timeout: 30000
+        }
+      ),
+      'charger state refresh'
     );
 
     const charger = response.data?.data?.chargers?.find((entry) => entry?.sn === this.chargerSerial);
@@ -365,7 +380,15 @@ export class EnphaseChargerClient {
     const sessionState = this.describeSessionState(charger, connector);
     const powerWatts = charging ? this.getRecentLivePowerWatts() : 0;
 
-    if (!charging) {
+    if (charging) {
+      if (!this.chargingSessionArmed) {
+        this.chargingSessionArmed = true;
+        this.captureSessionBaseline();
+      }
+      void this.ensureEvseLiveStream(false).catch((error) => {
+        this.log.warn?.(`Unable to start EVSE livestream after polling detected charging: ${error.message || error}`);
+      });
+    } else {
       this.stopEvseLiveStream();
       this.resetEstimatedChargingSession();
       this.latestLivePowerWatts = 0;
@@ -374,6 +397,7 @@ export class EnphaseChargerClient {
     let state = {
       enabled: charging,
       active: charging,
+      pluggedIn,
       powerWatts,
       sessionState: sessionState || (pluggedIn ? 'plugged-in' : 'idle')
     };
@@ -400,17 +424,20 @@ export class EnphaseChargerClient {
       ? { chargingLevel: this.getResolvedChargingLevel(), connectorId: this.connectorId }
       : null;
 
-    const response = await axios({
-      method,
-      url,
-      data,
-      timeout: 30000,
-      validateStatus: () => true,
-      headers: this.buildEnlightenWebHeaders({
-        Accept: 'application/json, text/javascript, */*; q=0.01',
-        'Content-Type': 'application/json'
-      })
-    });
+    const response = await this.requestWithWebSessionRefresh(
+      () => axios({
+        method,
+        url,
+        data,
+        timeout: 30000,
+        validateStatus: () => true,
+        headers: this.buildEnlightenWebHeaders({
+          Accept: 'application/json, text/javascript, */*; q=0.01',
+          'Content-Type': 'application/json'
+        })
+      }),
+      'charger control'
+    );
 
     if (response.status >= 400) {
       this.log.warn?.(`Enlighten web control ${method.toUpperCase()} ${url} -> ${response.status} ${JSON.stringify(response.data)}`);
@@ -523,22 +550,28 @@ export class EnphaseChargerClient {
     }
 
     const [streamResponse, authResponse] = await Promise.all([
-      axios.get(
-        `${ENLIGHTEN_BASE_URL}/service/evse_controller/${this.systemId}/ev_chargers/start_live_stream`,
-        {
-          headers: this.buildEnlightenWebHeaders({
-            Accept: 'application/json, text/javascript, */*; q=0.01'
-          }),
-          timeout: 30000
-        }
+      this.requestWithWebSessionRefresh(
+        () => axios.get(
+          `${ENLIGHTEN_BASE_URL}/service/evse_controller/${this.systemId}/ev_chargers/start_live_stream`,
+          {
+            headers: this.buildEnlightenWebHeaders({
+              Accept: 'application/json, text/javascript, */*; q=0.01'
+            }),
+            timeout: 30000
+          }
+        ),
+        'EVSE livestream topic request'
       ),
-      axios.get(`${ENLIGHTEN_BASE_URL}/pv/aws_sigv4/livestream.json?serial_num=${this.gatewaySerial}`, {
-        headers: {
-          Cookie: this.enlightenCookieHeader,
-          Accept: 'application/json'
-        },
-        timeout: 30000
-      })
+      this.requestWithWebSessionRefresh(
+        () => axios.get(`${ENLIGHTEN_BASE_URL}/pv/aws_sigv4/livestream.json?serial_num=${this.gatewaySerial}`, {
+          headers: {
+            Cookie: this.enlightenCookieHeader,
+            Accept: 'application/json'
+          },
+          timeout: 30000
+        }),
+        'AWS livestream auth request'
+      )
     ]);
 
     const liveStreamTopicList = streamResponse.data?.data?.liveStreamTopicList;
@@ -605,7 +638,7 @@ export class EnphaseChargerClient {
 
     let mqttReady = false;
 
-    await new Promise((resolve, reject) => {
+    await new Promise<void>((resolve, reject) => {
       let settled = false;
       const timeoutHandle = setTimeout(() => {
         cleanup();
@@ -673,7 +706,7 @@ export class EnphaseChargerClient {
 
         const jsonPayload = this.tryParseJsonPayload(payloadBuffer);
         if (jsonPayload) {
-          const normalized = this.normalizeEvseLivePayload(jsonPayload);
+          const normalized: any = this.normalizeEvseLivePayload(jsonPayload);
           if (normalized) {
             powerWatts = typeof normalized.power_W === 'number' ? normalized.power_W : null;
             if (Number.isFinite(powerWatts)) {
@@ -762,14 +795,17 @@ export class EnphaseChargerClient {
 
     await this.authenticateEnlightenWebSession(forceRefresh);
 
-    const response = await axios.get(
-      `${ENLIGHTEN_BASE_URL}/service/evse_controller/api/v2/${this.systemId}/ev_chargers/summary?filter_retired=true`,
-      {
-        headers: this.buildEnlightenWebHeaders({
-          Accept: 'application/json, text/javascript, */*; q=0.01'
-        }),
-        timeout: 30000
-      }
+    const response = await this.requestWithWebSessionRefresh(
+      () => axios.get(
+        `${ENLIGHTEN_BASE_URL}/service/evse_controller/api/v2/${this.systemId}/ev_chargers/summary?filter_retired=true`,
+        {
+          headers: this.buildEnlightenWebHeaders({
+            Accept: 'application/json, text/javascript, */*; q=0.01'
+          }),
+          timeout: 30000
+        }
+      ),
+      'charger summary'
     );
 
     const chargers = Array.isArray(response.data?.data) ? response.data.data : [];
@@ -825,12 +861,13 @@ export class EnphaseChargerClient {
     this.log.info?.(`State request ${requestConfig.method?.toUpperCase()} ${requestConfig.url} -> ${response.status}`);
     this.log.debug?.(`State response payload: ${JSON.stringify(payload, null, 2)}`);
 
-    return {
-      enabled: this.readMappedValue(payload, this.stateRequest.enabledPath, false),
-      active: this.readMappedValue(payload, this.stateRequest.activePath, false),
-      powerWatts: this.readMappedValue(payload, this.stateRequest.powerPath, 0),
-      sessionState: this.readMappedValue(payload, this.stateRequest.sessionStatePath, 'unknown')
-    };
+      return {
+        enabled: this.readMappedValue(payload, this.stateRequest.enabledPath, false),
+        active: this.readMappedValue(payload, this.stateRequest.activePath, false),
+        pluggedIn: this.readMappedValue(payload, this.stateRequest.pluggedInPath, false),
+        powerWatts: this.readMappedValue(payload, this.stateRequest.powerPath, 0),
+        sessionState: this.readMappedValue(payload, this.stateRequest.sessionStatePath, 'unknown')
+      };
   }
 
   async setChargingEnabledViaRest(enabled) {
@@ -845,6 +882,7 @@ export class EnphaseChargerClient {
       return {
         enabled,
         active: enabled,
+        pluggedIn: enabled,
         powerWatts: enabled ? this.mockState.powerWatts : 0,
         sessionState: enabled ? 'enabled' : 'disabled'
       };
@@ -864,7 +902,7 @@ export class EnphaseChargerClient {
       headers.Authorization = `Bearer ${this.accessToken}`;
     }
 
-    const config = {
+    const config: any = {
       method,
       timeout: 30000,
       validateStatus: () => true,
@@ -975,6 +1013,58 @@ export class EnphaseChargerClient {
     return 'idle';
   }
 
+  async requestWithWebSessionRefresh(requestFn, label) {
+    let response;
+
+    try {
+      response = await this.withTransientRetry(requestFn, label);
+    } catch (error) {
+      const status = error?.response?.status;
+      if (status !== 401 && status !== 403) {
+        throw error;
+      }
+
+      this.log.warn?.(`${label} returned ${status}; refreshing Enlighten web session and retrying once.`);
+      await this.authenticateEnlightenWebSession(true);
+      return this.withTransientRetry(requestFn, `${label} after session refresh`);
+    }
+
+    if (response?.status !== 401 && response?.status !== 403) {
+      return response;
+    }
+
+    this.log.warn?.(`${label} returned ${response.status}; refreshing Enlighten web session and retrying once.`);
+    await this.authenticateEnlightenWebSession(true);
+    return this.withTransientRetry(requestFn, `${label} after session refresh`);
+  }
+
+  async withTransientRetry(requestFn, label) {
+    try {
+      return await requestFn();
+    } catch (error) {
+      if (!this.isTransientRequestError(error)) {
+        throw error;
+      }
+
+      this.log.debug?.(`${label} hit transient network error; retrying once: ${error.message || error}`);
+      await this.sleep(3000);
+      return requestFn();
+    }
+  }
+
+  isTransientRequestError(error) {
+    const code = error?.code;
+    const message = String(error?.message || '');
+    return [
+      'EAI_AGAIN',
+      'ENOTFOUND',
+      'ECONNRESET',
+      'ECONNABORTED',
+      'ETIMEDOUT',
+      'EPIPE'
+    ].includes(code) || message.includes('timeout');
+  }
+
   async sleep(milliseconds) {
     await new Promise((resolve) => setTimeout(resolve, milliseconds));
   }
@@ -993,6 +1083,7 @@ export class EnphaseChargerClient {
     this.commandedState = {
       enabled,
       active: enabled,
+      pluggedIn: enabled,
       powerWatts: enabled ? this.getRecentLivePowerWatts() : 0,
       sessionState: enabled ? 'charging' : 'idle'
     };
@@ -1003,6 +1094,7 @@ export class EnphaseChargerClient {
     return {
       enabled,
       active: enabled,
+      pluggedIn: enabled,
       powerWatts: enabled ? this.getRecentLivePowerWatts() : 0,
       sessionState: enabled ? 'charging' : 'idle'
     };
@@ -1025,6 +1117,7 @@ export class EnphaseChargerClient {
       ...state,
       enabled: this.commandedState.enabled,
       active: this.commandedState.active,
+      pluggedIn: this.commandedState.pluggedIn || state.pluggedIn,
       sessionState: this.commandedState.sessionState,
       powerWatts: this.commandedState.enabled
         ? Math.max(
@@ -1252,7 +1345,7 @@ export class EnphaseChargerClient {
     target.phaseCount = Math.max(target.phaseCount || 0, phaseValue.phaseCount);
   }
 
-  normalizePhaseValue(rawValue = {}, roundNumbers = false) {
+  normalizePhaseValue(rawValue: any = {}, roundNumbers = false) {
     const l1 = typeof rawValue.l1 === 'number' ? rawValue.l1 : '--';
     const l2 = typeof rawValue.l2 === 'number' ? rawValue.l2 : '--';
     const l3 = typeof rawValue.l3 === 'number' ? rawValue.l3 : '--';

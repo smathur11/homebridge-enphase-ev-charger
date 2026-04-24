@@ -15,19 +15,22 @@ The plugin can expose the charger switch plus optional Apple Home sensors for ch
 
 ## Current state
 
-Current test milestone: `v0.4.2`
+Current test milestone: `v0.5.0`
 
 This workspace is now partly wired to the real Enlighten homeowner web app.
 
 What is already wired in:
 
 - Homebridge platform plugin structure
+- TypeScript source with compiled JavaScript published from `dist`
 - Enphase credential-based login through Enlighten
 - a charger control accessory exposed as a `Switch`
 - optional `Contact Sensor` named `EV Charging Status`
 - optional `Light Sensor` named `Estimated EV Charging Power`
 - custom read-only characteristics for charging power and charger session state
 - a polling loop for charger status
+- adaptive polling based on idle, plugged-in, and charging state
+- retry handling for transient network failures and expired Enlighten web sessions
 - real browser-session control using the same Enphase web endpoints the Live Status page uses
 - estimated live charging power using the site-load livestream minus a pre-charge baseline
 
@@ -95,6 +98,7 @@ In `enlighten-web` mode:
 - state polling uses `GET /service/evse_controller/{systemId}/ev_chargers/status`
 - current status includes plugged-in and charging state
 - state polling is adaptive: slow while idle, moderate while plugged in, and faster while actively charging
+- if polling discovers that charging started outside Apple Home, the plugin starts the livestream so the estimated power sensor can update
 - estimated live charging power is derived from the site-load livestream and a pre-charge baseline
 - `chargingLevel` is automatically clamped to the charger's discovered maximum if your config exceeds it
 - Apple Home always gets:
@@ -113,6 +117,12 @@ Adaptive polling defaults:
 - after Apple Home start/stop commands: short burst refreshes at `5`, `15`, `30`, and `60` seconds
 
 The older `pollIntervalSeconds` setting is still accepted as a fallback for the charging poll interval, but new installs should prefer the three state-specific polling settings.
+
+Reliability behavior:
+
+- transient DNS, timeout, and connection-reset errors are retried once before being logged
+- `401` and `403` responses from Enlighten refresh the web session and retry once
+- repeated failures are still logged so real outages remain visible
 
 HomeKit accessory details:
 

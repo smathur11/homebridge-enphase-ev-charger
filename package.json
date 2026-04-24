@@ -1,7 +1,7 @@
 {
   "displayName": "Enphase EV Charger",
   "name": "homebridge-enphase-ev-charger",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "description": "Focused Homebridge plugin for the Enphase IQ EV charger.",
   "license": "MIT",
   "author": "Sanjay Mathur",
@@ -15,25 +15,30 @@
   },
   "type": "module",
   "exports": {
-    ".": "./index.js"
+    ".": "./dist/index.js"
   },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "files": [
+    "dist",
     "src",
     "docs",
-    "index.js",
+    "index.ts",
     "config.schema.json",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE",
-    "package.json"
+    "package.json",
+    "tsconfig.json"
   ],
   "engines": {
     "homebridge": "^1.8.0 || ^2.0.0 || ^2.0.0-beta.79 || ^2.0.0-alpha.81",
     "node": "^20 || ^22 || ^24 || ^25"
   },
   "dependencies": {
-    "axios": "^1.13.6",
+    "axios": "^1.15.2",
     "mqtt": "^5.14.1",
-    "protobufjs": "^7.5.4"
+    "protobufjs": "^7.5.5"
   },
   "keywords": [
     "homebridge",
@@ -44,6 +49,12 @@
     "evse"
   ],
   "scripts": {
-    "test": "node --check index.js && node --check src/platform.js && node --check src/accessory.js && node --check src/client.js && node --check src/custom-characteristics.js"
+    "build": "tsc",
+    "prepack": "npm run build",
+    "test": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "typescript": "^6.0.3"
   }
 }

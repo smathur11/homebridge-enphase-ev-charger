@@ -14,6 +14,8 @@ import {
 } from './constants.js';
 
 export class EnphaseEvChargerPlatform {
+  [key: string]: any;
+
   constructor(log, config, api) {
     this.log = log;
     this.config = config;
@@ -22,6 +24,7 @@ export class EnphaseEvChargerPlatform {
     this.lastKnownState = {
       enabled: false,
       active: false,
+      pluggedIn: false,
       powerWatts: 0,
       sessionState: 'unknown'
     };
@@ -198,7 +201,7 @@ export class EnphaseEvChargerPlatform {
       return intervals.charging;
     }
 
-    if (this.isPluggedInSessionState(this.lastKnownState.sessionState)) {
+    if (this.lastKnownState.pluggedIn || this.isPluggedInSessionState(this.lastKnownState.sessionState)) {
       return intervals.pluggedIn;
     }
 
