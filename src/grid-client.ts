@@ -3,7 +3,6 @@ import https from 'node:https';
 
 const DEFAULT_UTILITY_POWER_TIMEOUT_MS = 15000;
 const ENLIGHTEN_BASE_URL = 'https://enlighten.enphaseenergy.com';
-const ENTREZ_BASE_URL = 'https://entrez.enphaseenergy.com';
 
 const GRID_AVAILABLE_VALUES = new Set([
   'closed',
@@ -197,9 +196,10 @@ export class EnphaseGridClient {
 
     let tokenResponse;
     try {
-      tokenResponse = await axios.post(`${ENTREZ_BASE_URL}/tokens`, {
-        serial_num: this.gatewaySerial
-      }, {
+      tokenResponse = await axios.get(`${ENLIGHTEN_BASE_URL}/entrez-auth-token`, {
+        params: {
+          serial_num: this.gatewaySerial
+        },
         headers: {
           Accept: 'application/json',
           Cookie: cookies.join('; ')
@@ -209,7 +209,7 @@ export class EnphaseGridClient {
     } catch (error) {
       throw this.describeHttpError(
         error,
-        `Entrez Envoy token request for gateway serial ${this.maskSerial(this.gatewaySerial)}`
+        `Enlighten Entrez auth token request for gateway serial ${this.maskSerial(this.gatewaySerial)}`
       );
     }
 

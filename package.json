@@ -1,7 +1,7 @@
 {
   "displayName": "Enphase EV Charger",
   "name": "homebridge-enphase-ev-charger",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "Focused Homebridge plugin for the Enphase IQ EV charger.",
   "license": "MIT",
   "author": "Sanjay Mathur",

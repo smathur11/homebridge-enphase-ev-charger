@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.3
+
+- Use Enlighten's `/entrez-auth-token` endpoint for local Envoy token acquisition, matching the upstream Envoy plugin flow.
+- Fix `Empty Username` errors from the incorrect Entrez token endpoint used in `0.6.1` and `0.6.2`.
+
 ## 0.6.2
 
 - Pass the auto-discovered gateway serial from the charger summary into Utility Power local Envoy token requests.
