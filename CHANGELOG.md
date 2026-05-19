@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.1
+
+- Automatically fetch and refresh the local Envoy/IQ Gateway bearer token for Utility Power polling using the existing Enlighten username, password, and gateway serial.
+- Retry local Envoy requests once after refreshing the token when the gateway returns `401`.
+- Keep manual `envoyToken` support as an optional override/fallback.
+
 ## 0.6.0
 
 - Added an optional `Utility Power` Contact Sensor backed by local Envoy/IQ Gateway Ensemble/Enpower data.

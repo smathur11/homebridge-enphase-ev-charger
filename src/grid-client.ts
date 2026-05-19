@@ -2,6 +2,8 @@ import axios from 'axios';
 import https from 'node:https';
 
 const DEFAULT_UTILITY_POWER_TIMEOUT_MS = 15000;
+const ENLIGHTEN_BASE_URL = 'https://enlighten.enphaseenergy.com';
+const ENTREZ_BASE_URL = 'https://entrez.enphaseenergy.com';
 
 const GRID_AVAILABLE_VALUES = new Set([
   'closed',
@@ -34,7 +36,11 @@ export class EnphaseGridClient {
   constructor(log, config) {
     this.log = log;
     this.gatewayHost = config.gatewayHost || '';
+    this.gatewaySerial = config.gatewaySerial || '';
+    this.enlightenUser = config.enlightenUser || '';
+    this.enlightenPasswd = config.enlightenPasswd || '';
     this.envoyToken = config.envoyToken || '';
+    this.tokenExpiresAt = 0;
     this.timeoutMs = Number(config.utilityPowerTimeoutMs || DEFAULT_UTILITY_POWER_TIMEOUT_MS);
     this.httpsAgent = new https.Agent({ rejectUnauthorized: false });
   }
@@ -97,17 +103,119 @@ export class EnphaseGridClient {
       Accept: 'application/json'
     };
 
-    if (this.envoyToken) {
-      headers.Authorization = `Bearer ${this.envoyToken}`;
+    const token = await this.getEnvoyToken();
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
     }
 
-    const response = await axios.get(`${this.getGatewayBaseUrl()}${path}`, {
-      headers,
-      httpsAgent: this.httpsAgent,
+    let response;
+    try {
+      response = await axios.get(`${this.getGatewayBaseUrl()}${path}`, {
+        headers,
+        httpsAgent: this.httpsAgent,
+        timeout: this.timeoutMs
+      });
+    } catch (error) {
+      if (error?.response?.status !== 401 || !token) {
+        throw error;
+      }
+
+      const refreshedToken = await this.refreshEnvoyToken();
+      response = await axios.get(`${this.getGatewayBaseUrl()}${path}`, {
+        headers: {
+          ...headers,
+          Authorization: `Bearer ${refreshedToken}`
+        },
+        httpsAgent: this.httpsAgent,
+        timeout: this.timeoutMs
+      });
+    }
+
+    return response.data;
+  }
+
+  async getEnvoyToken() {
+    if (this.envoyToken && !this.isEnvoyTokenExpired()) {
+      return this.envoyToken;
+    }
+
+    if (!this.enlightenUser || !this.enlightenPasswd || !this.gatewaySerial) {
+      return this.envoyToken || '';
+    }
+
+    return this.refreshEnvoyToken();
+  }
+
+  isEnvoyTokenExpired() {
+    return this.tokenExpiresAt > 0 && Date.now() > (this.tokenExpiresAt - 60000);
+  }
+
+  async refreshEnvoyToken() {
+    if (!this.enlightenUser || !this.enlightenPasswd || !this.gatewaySerial) {
+      if (this.envoyToken) {
+        return this.envoyToken;
+      }
+
+      throw new Error('Missing Enlighten username, password, or gateway serial for Envoy local API token.');
+    }
+
+    const loginForm = new URLSearchParams();
+    loginForm.append('user[email]', this.enlightenUser);
+    loginForm.append('user[password]', this.enlightenPasswd);
+
+    const loginResponse = await axios.post(`${ENLIGHTEN_BASE_URL}/login/login.json`, loginForm, {
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
       timeout: this.timeoutMs
     });
 
-    return response.data;
+    const cookies = loginResponse.headers['set-cookie'];
+    if (!cookies?.length) {
+      throw new Error('Enlighten login succeeded but no session cookie was returned for Envoy token request.');
+    }
+
+    const tokenResponse = await axios.post(`${ENTREZ_BASE_URL}/tokens`, {
+      serial_num: this.gatewaySerial
+    }, {
+      headers: {
+        Accept: 'application/json',
+        Cookie: cookies.join('; ')
+      },
+      timeout: this.timeoutMs
+    });
+
+    const token = tokenResponse.data?.token;
+    if (!token) {
+      throw new Error('Entrez token response did not contain an Envoy token.');
+    }
+
+    this.envoyToken = token;
+    this.tokenExpiresAt = this.parseTokenExpiresAt(token, tokenResponse.data?.expires_at);
+    this.log.debug?.(`Received Envoy local API token expiring at ${this.tokenExpiresAt || 'unknown'}.`);
+    return this.envoyToken;
+  }
+
+  parseTokenExpiresAt(token, fallbackExpiresAt) {
+    const fallbackMilliseconds = Number(fallbackExpiresAt || 0);
+    if (fallbackMilliseconds > 0) {
+      return fallbackMilliseconds > 1000000000000
+        ? fallbackMilliseconds
+        : fallbackMilliseconds * 1000;
+    }
+
+    const [, payload] = String(token || '').split('.');
+    if (!payload) {
+      return 0;
+    }
+
+    try {
+      const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+      return decoded.exp ? decoded.exp * 1000 : 0;
+    } catch {
+      return 0;
+    }
   }
 
   getGatewayBaseUrl() {

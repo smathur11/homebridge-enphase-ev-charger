@@ -16,7 +16,7 @@ The plugin can expose the charger switch plus optional Apple Home sensors for ch
 
 ## Current state
 
-Current test milestone: `v0.6.0`
+Current test milestone: `v0.6.1`
 
 This workspace is now partly wired to the real Enlighten homeowner web app.
 
@@ -135,6 +135,8 @@ Utility Power behavior:
 
 - disabled by default with `enableUtilityPowerSensor: false`
 - polls the local Envoy/IQ Gateway, not the Enphase cloud
+- automatically obtains a local Envoy bearer token from Enphase using the configured Enlighten username, password, and gateway serial
+- `envoyToken` can still be supplied manually as an optional override/fallback
 - checks local Ensemble/Enpower endpoints such as `/ivp/ensemble/relay`, `/ivp/ensemble/inventory`, and `/ivp/ensemble/status`
 - treats `mains_admin_state: "closed"` as grid available and `mains_admin_state: "open"` as grid unavailable
 - debounces grid-state changes for `45` seconds by default before updating HomeKit
