@@ -1383,6 +1383,10 @@ export class EnphaseChargerClient {
     };
   }
 
+  getGatewaySerial() {
+    return this.gatewaySerial || '';
+  }
+
   getDiscoveredChargerMetadata() {
     return {
       modelName: this.summaryModelName || '',

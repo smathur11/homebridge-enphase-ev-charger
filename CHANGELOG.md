@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.2
+
+- Pass the auto-discovered gateway serial from the charger summary into Utility Power local Envoy token requests.
+- Improve Utility Power HTTP error messages so logs identify whether failures come from Enlighten login, Entrez token fetch, or local Envoy API calls.
+
 ## 0.6.1
 
 - Automatically fetch and refresh the local Envoy/IQ Gateway bearer token for Utility Power polling using the existing Enlighten username, password, and gateway serial.

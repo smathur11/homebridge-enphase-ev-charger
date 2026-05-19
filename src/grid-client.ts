@@ -45,6 +45,16 @@ export class EnphaseGridClient {
     this.httpsAgent = new https.Agent({ rejectUnauthorized: false });
   }
 
+  updateConfig(config = {}) {
+    if ((config as any).gatewaySerial) {
+      this.gatewaySerial = (config as any).gatewaySerial;
+    }
+    if ((config as any).envoyToken) {
+      this.envoyToken = (config as any).envoyToken;
+      this.tokenExpiresAt = this.parseTokenExpiresAt(this.envoyToken, 0);
+    }
+  }
+
   async getUtilityPowerState() {
     if (!this.gatewayHost) {
       throw new Error('Missing gatewayHost for Utility Power local Envoy polling.');
@@ -117,18 +127,22 @@ export class EnphaseGridClient {
       });
     } catch (error) {
       if (error?.response?.status !== 401 || !token) {
-        throw error;
+        throw this.describeHttpError(error, `Envoy local API ${path}`);
       }
 
       const refreshedToken = await this.refreshEnvoyToken();
-      response = await axios.get(`${this.getGatewayBaseUrl()}${path}`, {
-        headers: {
-          ...headers,
-          Authorization: `Bearer ${refreshedToken}`
-        },
-        httpsAgent: this.httpsAgent,
-        timeout: this.timeoutMs
-      });
+      try {
+        response = await axios.get(`${this.getGatewayBaseUrl()}${path}`, {
+          headers: {
+            ...headers,
+            Authorization: `Bearer ${refreshedToken}`
+          },
+          httpsAgent: this.httpsAgent,
+          timeout: this.timeoutMs
+        });
+      } catch (retryError) {
+        throw this.describeHttpError(retryError, `Envoy local API ${path} after token refresh`);
+      }
     }
 
     return response.data;
@@ -163,28 +177,41 @@ export class EnphaseGridClient {
     loginForm.append('user[email]', this.enlightenUser);
     loginForm.append('user[password]', this.enlightenPasswd);
 
-    const loginResponse = await axios.post(`${ENLIGHTEN_BASE_URL}/login/login.json`, loginForm, {
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
-      timeout: this.timeoutMs
-    });
+    let loginResponse;
+    try {
+      loginResponse = await axios.post(`${ENLIGHTEN_BASE_URL}/login/login.json`, loginForm, {
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        timeout: this.timeoutMs
+      });
+    } catch (error) {
+      throw this.describeHttpError(error, 'Enlighten login for Envoy token');
+    }
 
     const cookies = loginResponse.headers['set-cookie'];
     if (!cookies?.length) {
       throw new Error('Enlighten login succeeded but no session cookie was returned for Envoy token request.');
     }
 
-    const tokenResponse = await axios.post(`${ENTREZ_BASE_URL}/tokens`, {
-      serial_num: this.gatewaySerial
-    }, {
-      headers: {
-        Accept: 'application/json',
-        Cookie: cookies.join('; ')
-      },
-      timeout: this.timeoutMs
-    });
+    let tokenResponse;
+    try {
+      tokenResponse = await axios.post(`${ENTREZ_BASE_URL}/tokens`, {
+        serial_num: this.gatewaySerial
+      }, {
+        headers: {
+          Accept: 'application/json',
+          Cookie: cookies.join('; ')
+        },
+        timeout: this.timeoutMs
+      });
+    } catch (error) {
+      throw this.describeHttpError(
+        error,
+        `Entrez Envoy token request for gateway serial ${this.maskSerial(this.gatewaySerial)}`
+      );
+    }
 
     const token = tokenResponse.data?.token;
     if (!token) {
@@ -216,6 +243,34 @@ export class EnphaseGridClient {
     } catch {
       return 0;
     }
+  }
+
+  describeHttpError(error, context) {
+    const status = error?.response?.status;
+    if (!status) {
+      return error;
+    }
+
+    const body = this.summarizeResponseBody(error.response?.data);
+    return new Error(`${context} failed with HTTP ${status}${body ? `: ${body}` : ''}`);
+  }
+
+  summarizeResponseBody(data) {
+    if (data === undefined || data === null) {
+      return '';
+    }
+
+    const text = typeof data === 'string' ? data : JSON.stringify(data);
+    return text.length > 240 ? `${text.slice(0, 240)}...` : text;
+  }
+
+  maskSerial(serial) {
+    const value = String(serial || '');
+    if (value.length <= 4) {
+      return value ? '****' : 'unknown';
+    }
+
+    return `${'*'.repeat(Math.max(0, value.length - 4))}${value.slice(-4)}`;
   }
 
   getGatewayBaseUrl() {

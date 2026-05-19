@@ -189,10 +189,20 @@ export class EnphaseEvChargerPlatform {
   }
 
   applySharedState(state) {
+    this.syncGridClientDiscoveredConfig();
     this.lastKnownState = { ...state };
     this.evChargerAccessory?.refreshState(state);
     this.evChargingStatusAccessory?.refreshState(state);
     this.evChargingPowerAccessory?.refreshState(state);
+  }
+
+  syncGridClientDiscoveredConfig() {
+    const discoveredGatewaySerial = this.client.getGatewaySerial?.() || '';
+    if (discoveredGatewaySerial) {
+      this.gridClient?.updateConfig({
+        gatewaySerial: discoveredGatewaySerial
+      });
+    }
   }
 
   handleLivePowerUpdate(powerWatts) {
