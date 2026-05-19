@@ -6,6 +6,7 @@ This is a focused Homebridge plugin workspace for the Enphase IQ EV charger. It 
 - current charger state, including estimated live power in watts
 - optional charging-status sensor in Apple Home
 - optional estimated charging-power sensor in Apple Home using a light sensor with lux as a watt proxy
+- optional utility/grid-power sensor in Apple Home using local Envoy/IQ Gateway data
 
 ## Apple Home
 
@@ -15,7 +16,7 @@ The plugin can expose the charger switch plus optional Apple Home sensors for ch
 
 ## Current state
 
-Current test milestone: `v0.5.0`
+Current test milestone: `v0.6.0`
 
 This workspace is now partly wired to the real Enlighten homeowner web app.
 
@@ -27,6 +28,7 @@ What is already wired in:
 - a charger control accessory exposed as a `Switch`
 - optional `Contact Sensor` named `EV Charging Status`
 - optional `Light Sensor` named `Estimated EV Charging Power`
+- optional `Contact Sensor` named `Utility Power`
 - custom read-only characteristics for charging power and charger session state
 - a polling loop for charger status
 - adaptive polling based on idle, plugged-in, and charging state
@@ -80,6 +82,9 @@ In `enlighten-web` mode, the plugin can discover:
   "enlightenPasswd": "your-password",
   "exposeChargingStatusSensor": true,
   "exposeChargingPowerSensor": false,
+  "enableUtilityPowerSensor": false,
+  "utilityPowerDebounceSeconds": 45,
+  "utilityPowerPollIntervalSeconds": 60,
   "idlePollIntervalSeconds": 300,
   "pluggedInPollIntervalSeconds": 60,
   "chargingPollIntervalSeconds": 30,
@@ -106,8 +111,10 @@ In `enlighten-web` mode:
 - Apple Home optionally gets:
   - a `Contact Sensor` named `EV Charging Status`
   - a `Light Sensor` named `Estimated EV Charging Power`
+  - a `Contact Sensor` named `Utility Power`
 - the contact sensor is `open` while the car is actively charging and `closed` while it is not charging
 - the power sensor reports lux equal to watts, so `3800 lux` means about `3800 W`
+- the Utility Power sensor is `closed` / contact detected when utility grid power is available and `open` / contact not detected when the system appears islanded
 
 Adaptive polling defaults:
 
@@ -123,6 +130,15 @@ Reliability behavior:
 - transient DNS, timeout, and connection-reset errors are retried once before being logged
 - `401` and `403` responses from Enlighten refresh the web session and retry once
 - repeated failures are still logged so real outages remain visible
+
+Utility Power behavior:
+
+- disabled by default with `enableUtilityPowerSensor: false`
+- polls the local Envoy/IQ Gateway, not the Enphase cloud
+- checks local Ensemble/Enpower endpoints such as `/ivp/ensemble/relay`, `/ivp/ensemble/inventory`, and `/ivp/ensemble/status`
+- treats `mains_admin_state: "closed"` as grid available and `mains_admin_state: "open"` as grid unavailable
+- debounces grid-state changes for `45` seconds by default before updating HomeKit
+- if the Envoy is unreachable, it retains the last known state instead of reporting an outage
 
 HomeKit accessory details:
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0
+
+- Added an optional `Utility Power` Contact Sensor backed by local Envoy/IQ Gateway Ensemble/Enpower data.
+- Added local grid-state polling with `/ivp/ensemble/relay`, `/ivp/ensemble/inventory`, and `/ivp/ensemble/status` fallbacks.
+- Added debounced utility-state changes so transient relay transitions do not immediately flip HomeKit state.
+- Retain the last known utility state when the Envoy is unreachable instead of treating communication failures as outages.
+- Added Homebridge config options for enabling the sensor, debounce duration, and utility polling interval.
+
 ## 0.5.0
 
 - Migrated the plugin source to TypeScript and added a build step that publishes compiled JavaScript from `dist`.

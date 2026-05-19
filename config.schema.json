@@ -20,6 +20,11 @@
         "title": "Gateway Serial (optional)",
         "type": "string"
       },
+      "envoyToken": {
+        "title": "Envoy Local API Token (optional)",
+        "description": "Bearer token for local Envoy/IQ Gateway API calls. Required by many firmware versions for Utility Power local polling.",
+        "type": "string"
+      },
       "systemId": {
         "title": "Enphase System ID",
         "type": "string"
@@ -45,6 +50,26 @@
         "title": "Expose Estimated Charging Power Sensor (Light Level)",
         "type": "boolean",
         "default": false
+      },
+      "enableUtilityPowerSensor": {
+        "title": "Expose Utility Power Sensor",
+        "description": "Adds a read-only Contact Sensor named Utility Power using the local Envoy/IQ Gateway. Closed/contact detected means utility grid power is available; open/contact not detected means outage or islanded.",
+        "type": "boolean",
+        "default": false
+      },
+      "utilityPowerDebounceSeconds": {
+        "title": "Utility Power Debounce (seconds)",
+        "description": "Grid state must remain changed for this long before HomeKit is updated.",
+        "type": "integer",
+        "default": 45,
+        "minimum": 0
+      },
+      "utilityPowerPollIntervalSeconds": {
+        "title": "Utility Power Poll Interval (seconds)",
+        "description": "How often to poll the local Envoy/IQ Gateway for utility grid state when the Utility Power sensor is enabled.",
+        "type": "integer",
+        "default": 60,
+        "minimum": 15
       },
       "pollIntervalSeconds": {
         "title": "Legacy Poll Interval / Charging Poll Interval (seconds)",

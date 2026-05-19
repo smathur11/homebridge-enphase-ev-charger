@@ -1,14 +1,18 @@
 import { EnphaseChargerClient } from './client.js';
+import { EnphaseGridClient } from './grid-client.js';
 import {
   EnphaseEvChargerAccessory,
   EnphaseEvChargingPowerAccessory,
   EnphaseEvChargingStatusAccessory
 } from './accessory.js';
+import { UtilityPowerAccessory } from './utility-power-accessory.js';
 import {
   DEFAULT_CHARGING_POLL_INTERVAL_SECONDS,
   DEFAULT_IDLE_POLL_INTERVAL_SECONDS,
   DEFAULT_PLUGGED_IN_POLL_INTERVAL_SECONDS,
   DEFAULT_POLL_INTERVAL_SECONDS,
+  DEFAULT_UTILITY_POWER_DEBOUNCE_SECONDS,
+  DEFAULT_UTILITY_POWER_POLL_INTERVAL_SECONDS,
   PLATFORM_NAME,
   PLUGIN_NAME
 } from './constants.js';
@@ -30,6 +34,17 @@ export class EnphaseEvChargerPlatform {
     };
     this.refreshTimer = null;
     this.refreshInFlight = false;
+    this.gridRefreshTimer = null;
+    this.gridRefreshInFlight = false;
+    this.utilityPowerState = {
+      available: true,
+      unknown: true,
+      rawState: '',
+      source: 'initial-default',
+      gridMode: '',
+      updatedAt: 0
+    };
+    this.pendingUtilityPowerState = null;
 
     if (!config) {
       this.log.warn('No configuration found for Enphase EV Charger.');
@@ -58,6 +73,13 @@ export class EnphaseEvChargerPlatform {
       mockSessionState: config.mockSessionState || 'idle'
     });
 
+    this.gridClient = new EnphaseGridClient(this.log, {
+      gatewayHost: config.gatewayHost || '192.168.0.205',
+      gatewaySerial: config.gatewaySerial || '',
+      envoyToken: config.envoyToken || '',
+      utilityPowerTimeoutMs: config.utilityPowerTimeoutMs
+    });
+
     this.accessoryInfo = {
       manufacturer: config.manufacturer || 'Enphase',
       model: config.model || 'IQ-EVSE-60R',
@@ -84,8 +106,11 @@ export class EnphaseEvChargerPlatform {
     const statusUuid = hap.uuid.generate(`${PLUGIN_NAME}:${name}:status`);
     const powerName = 'Estimated EV Charging Power';
     const powerUuid = hap.uuid.generate(`${PLUGIN_NAME}:${name}:power`);
+    const utilityPowerName = 'Utility Power';
+    const utilityPowerUuid = hap.uuid.generate(`${PLUGIN_NAME}:${name}:utility-power`);
     const exposeChargingStatusSensor = this.config.exposeChargingStatusSensor !== false;
     const exposeChargingPowerSensor = Boolean(this.config.exposeChargingPowerSensor);
+    const enableUtilityPowerSensor = Boolean(this.config.enableUtilityPowerSensor);
     const expectedUuids = new Set([controlUuid]);
 
     if (exposeChargingStatusSensor) {
@@ -94,14 +119,18 @@ export class EnphaseEvChargerPlatform {
     if (exposeChargingPowerSensor) {
       expectedUuids.add(powerUuid);
     }
+    if (enableUtilityPowerSensor) {
+      expectedUuids.add(utilityPowerUuid);
+    }
 
-    this.unregisterStaleAccessories([name, statusName, powerName], expectedUuids);
+    this.unregisterStaleAccessories([name, statusName, powerName, utilityPowerName], expectedUuids);
 
     const controlAccessory = this.getOrCreateAccessory(platformAccessory, name, controlUuid);
 
     this.evChargerAccessory = new EnphaseEvChargerAccessory(this, controlAccessory);
     this.evChargingStatusAccessory = null;
     this.evChargingPowerAccessory = null;
+    this.utilityPowerAccessory = null;
 
     if (exposeChargingStatusSensor) {
       const statusAccessory = this.getOrCreateAccessory(platformAccessory, statusName, statusUuid);
@@ -113,8 +142,18 @@ export class EnphaseEvChargerPlatform {
       this.evChargingPowerAccessory = new EnphaseEvChargingPowerAccessory(this, powerAccessory);
     }
 
+    if (enableUtilityPowerSensor) {
+      const utilityPowerAccessory = this.getOrCreateAccessory(platformAccessory, utilityPowerName, utilityPowerUuid);
+      this.utilityPowerAccessory = new UtilityPowerAccessory(this, utilityPowerAccessory);
+      this.utilityPowerAccessory.refreshState(this.utilityPowerState);
+    }
+
     await this.refreshAccessories({ scheduleNext: false });
     this.scheduleNextRefresh();
+    if (enableUtilityPowerSensor) {
+      await this.refreshUtilityPower({ scheduleNext: false });
+      this.scheduleNextUtilityPowerRefresh();
+    }
   }
 
   getOrCreateAccessory(platformAccessory, name, uuid) {
@@ -245,5 +284,135 @@ export class EnphaseEvChargerPlatform {
         this.scheduleNextRefresh();
       }
     }
+  }
+
+  getUtilityPowerPollIntervalSeconds() {
+    return Math.max(
+      15,
+      Number(this.config.utilityPowerPollIntervalSeconds || DEFAULT_UTILITY_POWER_POLL_INTERVAL_SECONDS)
+    );
+  }
+
+  getUtilityPowerDebounceSeconds() {
+    return Math.max(
+      0,
+      Number(this.config.utilityPowerDebounceSeconds ?? DEFAULT_UTILITY_POWER_DEBOUNCE_SECONDS)
+    );
+  }
+
+  scheduleNextUtilityPowerRefresh(delaySeconds = this.getUtilityPowerPollIntervalSeconds()) {
+    if (!this.utilityPowerAccessory) {
+      return;
+    }
+
+    if (this.gridRefreshTimer) {
+      clearTimeout(this.gridRefreshTimer);
+    }
+
+    this.gridRefreshTimer = setTimeout(() => {
+      this.gridRefreshTimer = null;
+      void this.refreshUtilityPower();
+    }, delaySeconds * 1000);
+  }
+
+  async refreshUtilityPower({ scheduleNext = true } = {}) {
+    if (!this.utilityPowerAccessory || this.gridRefreshInFlight) {
+      return;
+    }
+
+    this.gridRefreshInFlight = true;
+    try {
+      const gridState = await this.gridClient.getUtilityPowerState();
+      this.handleUtilityPowerObservation(gridState);
+    } catch (error) {
+      this.markUtilityPowerUnknown(`Envoy unreachable, retaining last state: ${error.message || error}`);
+    } finally {
+      this.gridRefreshInFlight = false;
+      if (scheduleNext) {
+        this.scheduleNextUtilityPowerRefresh();
+      }
+    }
+  }
+
+  handleUtilityPowerObservation(gridState) {
+    if (typeof gridState.available !== 'boolean') {
+      this.markUtilityPowerUnknown(`UNKNOWN, retaining last state${gridState.detail ? ` (${gridState.detail})` : ''}`);
+      return;
+    }
+
+    const observed = {
+      available: gridState.available,
+      unknown: false,
+      rawState: gridState.rawState || '',
+      source: gridState.source || gridState.endpoint || 'unknown',
+      gridMode: gridState.gridMode || '',
+      updatedAt: Date.now()
+    };
+
+    if (observed.available === this.utilityPowerState.available && !this.utilityPowerState.unknown) {
+      this.pendingUtilityPowerState = null;
+      this.applyUtilityPowerState(observed);
+      return;
+    }
+
+    const debounceMs = this.getUtilityPowerDebounceSeconds() * 1000;
+    if (debounceMs === 0 || this.utilityPowerState.unknown) {
+      this.pendingUtilityPowerState = null;
+      this.applyUtilityPowerState(observed);
+      return;
+    }
+
+    if (!this.pendingUtilityPowerState || this.pendingUtilityPowerState.available !== observed.available) {
+      this.pendingUtilityPowerState = {
+        ...observed,
+        firstSeenAt: Date.now()
+      };
+      this.log.info(
+        `Utility Power: observed ${observed.available ? 'GRID_AVAILABLE' : 'GRID_OUTAGE'}; `
+        + `waiting ${this.getUtilityPowerDebounceSeconds()}s debounce before updating HomeKit`
+      );
+      return;
+    }
+
+    const elapsedMs = Date.now() - this.pendingUtilityPowerState.firstSeenAt;
+    this.pendingUtilityPowerState = {
+      ...this.pendingUtilityPowerState,
+      ...observed
+    };
+
+    if (elapsedMs >= debounceMs) {
+      const stableState = { ...this.pendingUtilityPowerState };
+      delete stableState.firstSeenAt;
+      this.pendingUtilityPowerState = null;
+      this.applyUtilityPowerState(stableState);
+    }
+  }
+
+  applyUtilityPowerState(nextState) {
+    const previousAvailable = this.utilityPowerState.available;
+    const previousUnknown = this.utilityPowerState.unknown;
+    this.utilityPowerState = {
+      ...this.utilityPowerState,
+      ...nextState,
+      unknown: false
+    };
+    this.utilityPowerAccessory?.refreshState(this.utilityPowerState);
+
+    if (previousUnknown || previousAvailable !== this.utilityPowerState.available) {
+      this.log.info(
+        `Utility Power: ${this.utilityPowerState.available ? 'GRID_AVAILABLE' : 'GRID_OUTAGE'}`
+        + `${this.utilityPowerState.rawState ? ` (${this.utilityPowerState.rawState})` : ''}`
+      );
+    }
+  }
+
+  markUtilityPowerUnknown(message) {
+    this.pendingUtilityPowerState = null;
+    this.utilityPowerState = {
+      ...this.utilityPowerState,
+      unknown: true
+    };
+    this.utilityPowerAccessory?.refreshState(this.utilityPowerState);
+    this.log.warn(`Utility Power: ${message}`);
   }
 }
