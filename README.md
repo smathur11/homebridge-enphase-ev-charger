@@ -16,7 +16,7 @@ The plugin can expose the charger switch plus optional Apple Home sensors for ch
 
 ## Current state
 
-Current test milestone: `v0.6.3`
+Current test milestone: `v0.6.4`
 
 This workspace is now partly wired to the real Enlighten homeowner web app.
 
@@ -105,7 +105,10 @@ In `enlighten-web` mode:
 - state polling is adaptive: slow while idle, moderate while plugged in, and faster while actively charging
 - if polling discovers that charging started outside Apple Home, the plugin starts the livestream so the estimated power sensor can update
 - estimated live charging power is derived from the site-load livestream and a pre-charge baseline
-- `chargingLevel` is automatically clamped to the charger's discovered maximum if your config exceeds it
+- `chargingLevel` is a per-session current request sent when Homebridge starts charging
+- `chargingLevel` is validated against discovered min, max, and granularity metadata where Enlighten provides it
+- the plugin logs discovered `chargeLevelDetails` so unsupported values can be diagnosed without guessing
+- this is not a permanent installer-level derate; Enphase schedules, Storm Guard, Green Charging, plug-and-charge, or sessions started outside Homebridge may use a different current
 - Apple Home always gets:
   - a `Switch` for control
 - Apple Home optionally gets:

@@ -173,6 +173,8 @@ export class EnphaseChargerClient {
     this.summaryPartNumber = '';
     this.summaryRatedCurrent = 0;
     this.summaryChargeLevelMax = 0;
+    this.summaryChargeLevelDetails = {};
+    this.loggedChargeLevelDetails = false;
     this.latestStreamSampleAt = 0;
     this.latestLivePowerWatts = 0;
     this.lastPublishedLivePowerWatts = null;
@@ -420,9 +422,17 @@ export class EnphaseChargerClient {
       ? `${ENLIGHTEN_BASE_URL}/service/evse_controller/${this.systemId}/ev_chargers/${this.chargerSerial}/start_charging`
       : `${ENLIGHTEN_BASE_URL}/service/evse_controller/${this.systemId}/ev_chargers/${this.chargerSerial}/stop_charging`;
     const method = enabled ? 'post' : 'put';
+    const resolvedChargingLevel = enabled ? this.getResolvedChargingLevel() : null;
     const data = enabled
-      ? { chargingLevel: this.getResolvedChargingLevel(), connectorId: this.connectorId }
+      ? { chargingLevel: resolvedChargingLevel, connectorId: this.connectorId }
       : null;
+
+    if (enabled) {
+      this.log.info?.(
+        `Starting IQ EV Charger at requested current ${resolvedChargingLevel} A`
+        + `${resolvedChargingLevel !== this.chargingLevel ? ` (configured ${this.chargingLevel} A)` : ''}.`
+      );
+    }
 
     const response = await this.requestWithWebSessionRefresh(
       () => axios({
@@ -440,13 +450,17 @@ export class EnphaseChargerClient {
     );
 
     if (response.status >= 400) {
-      this.log.warn?.(`Enlighten web control ${method.toUpperCase()} ${url} -> ${response.status} ${JSON.stringify(response.data)}`);
+      this.log.warn?.(
+        `Enlighten web control ${method.toUpperCase()} ${url} -> ${response.status} ${JSON.stringify(response.data)}`
+        + `${enabled ? `; requested chargingLevel=${resolvedChargingLevel}A; ${this.describeChargeLevelConstraints()}` : ''}`
+      );
       const alreadyInRequestedState = enabled
         ? response.data?.error?.additionalInfo === 'Charger is already in charging state'
         : response.data?.error?.additionalInfo === 'Charger is already in stopped state';
       if (!alreadyInRequestedState) {
         throw new Error(
           `Enlighten web control failed: ${method.toUpperCase()} ${url} -> ${response.status} ${JSON.stringify(response.data)}`
+          + `${enabled ? `; requested chargingLevel=${resolvedChargingLevel}A; ${this.describeChargeLevelConstraints()}` : ''}`
         );
       }
     } else {
@@ -837,10 +851,13 @@ export class EnphaseChargerClient {
     this.summarySku = selectedCharger.sku || this.summarySku;
     this.summaryPartNumber = selectedCharger.partNumber || this.summaryPartNumber;
     this.summaryRatedCurrent = this.parseFiniteNumber(selectedCharger.ratedCurrent, this.summaryRatedCurrent);
+    this.summaryChargeLevelDetails = selectedCharger.chargeLevelDetails || this.summaryChargeLevelDetails || {};
     this.summaryChargeLevelMax = this.parseFiniteNumber(
       selectedCharger.chargeLevelDetails?.max,
       this.summaryChargeLevelMax
     );
+
+    this.logChargeLevelDetails();
 
     if (!this.gatewaySerial) {
       this.gatewaySerial = selectedCharger.gatewayConnectivityDetails?.[0]?.gwSerialNum || this.gatewaySerial;
@@ -1394,28 +1411,74 @@ export class EnphaseChargerClient {
       partNumber: this.summaryPartNumber || '',
       ratedCurrent: this.summaryRatedCurrent || 0,
       chargeLevelMax: this.summaryChargeLevelMax || 0,
+      chargeLevelDetails: this.summaryChargeLevelDetails || {},
       firmwareVersion: this.summaryFirmwareVersion || ''
     };
   }
 
   getResolvedChargingLevel() {
+    const configuredLevel = this.parseFiniteNumber(this.chargingLevel, DEFAULT_CHARGING_LEVEL);
+    const chargeLevelDetails = this.summaryChargeLevelDetails || {};
+    const minLevel = this.parseFiniteNumber(chargeLevelDetails.min, 0);
+    const maxLevel = this.parseFiniteNumber(chargeLevelDetails.max, 0);
+    const granularity = this.parseFiniteNumber(chargeLevelDetails.granularity, 0);
+    const defaultLevel = this.parseFiniteNumber(chargeLevelDetails.defaultChargeLevel, 0);
     const discoveredLimit = Math.max(
+      maxLevel,
+      defaultLevel,
       this.parseFiniteNumber(this.summaryChargeLevelMax, 0),
       this.parseFiniteNumber(this.summaryRatedCurrent, 0)
     );
 
     if (!discoveredLimit) {
-      return this.chargingLevel;
+      return configuredLevel;
     }
 
-    const resolvedLevel = Math.min(this.chargingLevel, discoveredLimit);
-    if (resolvedLevel !== this.chargingLevel) {
+    let resolvedLevel = Math.min(configuredLevel, discoveredLimit);
+    if (minLevel && resolvedLevel < minLevel) {
+      resolvedLevel = minLevel;
+    }
+
+    if (granularity > 0 && minLevel) {
+      const stepsFromMin = Math.round((resolvedLevel - minLevel) / granularity);
+      resolvedLevel = minLevel + (stepsFromMin * granularity);
+      resolvedLevel = Math.max(minLevel, Math.min(resolvedLevel, discoveredLimit));
+    }
+
+    if (resolvedLevel !== configuredLevel) {
       this.log.warn?.(
-        `Configured chargingLevel ${this.chargingLevel}A exceeds charger capability; using ${resolvedLevel}A instead.`
+        `Configured chargingLevel ${configuredLevel}A does not fit discovered charger constraints; using ${resolvedLevel}A instead. `
+        + this.describeChargeLevelConstraints()
       );
     }
 
     return resolvedLevel;
+  }
+
+  logChargeLevelDetails() {
+    if (this.loggedChargeLevelDetails) {
+      return;
+    }
+
+    this.loggedChargeLevelDetails = true;
+    this.log.info?.(`Discovered EV charger charge level constraints: ${this.describeChargeLevelConstraints()}`);
+  }
+
+  describeChargeLevelConstraints() {
+    const details = this.summaryChargeLevelDetails || {};
+    const constraints = {
+      min: this.valueOrUnknown(details.min),
+      max: this.valueOrUnknown(details.max || this.summaryChargeLevelMax),
+      granularity: this.valueOrUnknown(details.granularity),
+      defaultChargeLevel: this.valueOrUnknown(details.defaultChargeLevel),
+      ratedCurrent: this.valueOrUnknown(this.summaryRatedCurrent)
+    };
+
+    return `chargeLevelDetails=${JSON.stringify(constraints)}`;
+  }
+
+  valueOrUnknown(value) {
+    return value === undefined || value === null || value === '' ? 'unknown' : value;
   }
 
   parseFiniteNumber(value, fallback = 0) {

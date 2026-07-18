@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.4
+
+- Capture and log the full EV charger `chargeLevelDetails` metadata discovered from Enlighten.
+- Validate configured `chargingLevel` against discovered min, max, and granularity where available before sending a start request.
+- Add clearer start-control logging showing the requested current and discovered charge-level constraints when Enphase rejects a request.
+
 ## 0.6.3
 
 - Use Enlighten's `/entrez-auth-token` endpoint for local Envoy token acquisition, matching the upstream Envoy plugin flow.
