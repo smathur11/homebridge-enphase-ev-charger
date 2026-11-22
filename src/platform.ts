@@ -75,6 +75,7 @@ export class EnphaseEvChargerPlatform {
 
     this.gridClient = new EnphaseGridClient(this.log, {
       gatewayHost: config.gatewayHost || '192.168.0.205',
+      gatewayTlsCa: config.gatewayTlsCa,
       gatewaySerial: config.gatewaySerial || '',
       enlightenUser: config.enlightenUser || '',
       enlightenPasswd: config.enlightenPasswd || '',

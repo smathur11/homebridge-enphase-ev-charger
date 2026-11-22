@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.5
+
+- Update production dependencies to address npm audit findings.
+- Keep livestream credentials and raw API responses out of plugin diagnostics.
+- Require HTTPS for local Envoy polling, disable redirects and proxies, and support a trusted gateway certificate.
+
 ## 0.6.4
 
 - Capture and log the full EV charger `chargeLevelDetails` metadata discovered from Enlighten.

@@ -406,7 +406,7 @@ export class EnphaseChargerClient {
 
     state = this.applyCommandedStateOverride(state);
 
-    this.log.debug?.(`Enlighten charger state payload: ${JSON.stringify(charger, null, 2)}`);
+    this.log.debug?.(`Enlighten charger state: charging=${charging}, pluggedIn=${pluggedIn}`);
 
     return state;
   }
@@ -451,7 +451,7 @@ export class EnphaseChargerClient {
 
     if (response.status >= 400) {
       this.log.warn?.(
-        `Enlighten web control ${method.toUpperCase()} ${url} -> ${response.status} ${JSON.stringify(response.data)}`
+        `Enlighten web control ${method.toUpperCase()} ${url} -> ${response.status}`
         + `${enabled ? `; requested chargingLevel=${resolvedChargingLevel}A; ${this.describeChargeLevelConstraints()}` : ''}`
       );
       const alreadyInRequestedState = enabled
@@ -459,13 +459,12 @@ export class EnphaseChargerClient {
         : response.data?.error?.additionalInfo === 'Charger is already in stopped state';
       if (!alreadyInRequestedState) {
         throw new Error(
-          `Enlighten web control failed: ${method.toUpperCase()} ${url} -> ${response.status} ${JSON.stringify(response.data)}`
+          `Enlighten web control failed: ${method.toUpperCase()} ${url} -> ${response.status}`
           + `${enabled ? `; requested chargingLevel=${resolvedChargingLevel}A; ${this.describeChargeLevelConstraints()}` : ''}`
         );
       }
     } else {
       this.log.info?.(`Enlighten web control ${method.toUpperCase()} ${url} -> ${response.status}`);
-      this.log.debug?.(`Enlighten web control payload: ${JSON.stringify(response.data, null, 2)}`);
     }
 
     return this.refreshStateAfterControl(enabled, method, url);
@@ -546,7 +545,7 @@ export class EnphaseChargerClient {
 
     this.mqttConnectPromise = this.connectEvseLiveStream(forceRefresh)
       .catch((error) => {
-        this.log.warn(`EVSE livestream setup failed: ${error.message || error}`);
+        this.log.warn('EVSE livestream setup failed.');
       })
       .finally(() => {
         this.mqttConnectPromise = null;
@@ -629,7 +628,7 @@ export class EnphaseChargerClient {
     }
 
     this.mqttTopic = topic;
-    this.log.debug?.(`Connecting to EVSE livestream topics ${JSON.stringify(wildcardTopics)} via ${brokerUrl}`);
+    this.log.debug?.('Connecting to EVSE livestream broker.');
 
     const client = mqtt.connect(brokerUrl, {
       protocol: 'wss',
@@ -756,7 +755,7 @@ export class EnphaseChargerClient {
     });
 
     client.on('error', (error) => {
-      this.log.warn(`EVSE livestream client error (${mqttEndpoint}): ${error.message || error}`);
+      this.log.warn('EVSE livestream client error.');
       if (!mqttReady) {
         this.stopEvseLiveStream(client);
       }
@@ -875,8 +874,7 @@ export class EnphaseChargerClient {
     const response = await axios(requestConfig);
     const payload = response.data;
 
-    this.log.info?.(`State request ${requestConfig.method?.toUpperCase()} ${requestConfig.url} -> ${response.status}`);
-    this.log.debug?.(`State response payload: ${JSON.stringify(payload, null, 2)}`);
+    this.log.info?.(`State request ${requestConfig.method?.toUpperCase()} -> ${response.status}`);
 
       return {
         enabled: this.readMappedValue(payload, this.stateRequest.enabledPath, false),
@@ -892,8 +890,7 @@ export class EnphaseChargerClient {
     const response = await axios(requestConfig);
     const payload = response.data;
 
-    this.log.info?.(`Control request ${requestConfig.method?.toUpperCase()} ${requestConfig.url} -> ${response.status}`);
-    this.log.debug?.(`Control response payload: ${JSON.stringify(payload, null, 2)}`);
+    this.log.info?.(`Control request ${requestConfig.method?.toUpperCase()} -> ${response.status}`);
 
     if (!this.stateRequest.url) {
       return {

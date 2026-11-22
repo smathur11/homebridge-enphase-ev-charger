@@ -20,6 +20,11 @@
         "title": "Gateway Serial (optional)",
         "type": "string"
       },
+      "gatewayTlsCa": {
+        "title": "Trusted Gateway Certificate (optional)",
+        "description": "PEM certificate or CA for verifying the local gateway. The gateway hostname must match its certificate.",
+        "type": "string"
+      },
       "envoyToken": {
         "title": "Envoy Local API Token (optional)",
         "description": "Bearer token for local Envoy/IQ Gateway API calls. Required by many firmware versions for Utility Power local polling.",

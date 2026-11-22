@@ -41,7 +41,8 @@ export class EnphaseGridClient {
     this.envoyToken = config.envoyToken || '';
     this.tokenExpiresAt = 0;
     this.timeoutMs = Number(config.utilityPowerTimeoutMs || DEFAULT_UTILITY_POWER_TIMEOUT_MS);
-    this.httpsAgent = new https.Agent({ rejectUnauthorized: false });
+    const ca = config.gatewayTlsCa?.trim();
+    this.httpsAgent = new https.Agent({ ca, rejectUnauthorized: Boolean(ca) });
   }
 
   updateConfig(config = {}) {
@@ -89,7 +90,7 @@ export class EnphaseGridClient {
         errors.push(`${attempt.path}: no supported grid-state field found`);
       } catch (error) {
         if (this.isUnsupportedEndpointError(error)) {
-          errors.push(`${attempt.path}: unsupported (${error.response?.status})`);
+          errors.push(error.message);
           continue;
         }
 
@@ -108,6 +109,13 @@ export class EnphaseGridClient {
   }
 
   async fetchJson(path) {
+    const url = `${this.getGatewayBaseUrl()}${path}`;
+    const options = {
+      httpsAgent: this.httpsAgent,
+      timeout: this.timeoutMs,
+      maxRedirects: 0,
+      proxy: false as const
+    };
     const headers: any = {
       Accept: 'application/json'
     };
@@ -119,11 +127,7 @@ export class EnphaseGridClient {
 
     let response;
     try {
-      response = await axios.get(`${this.getGatewayBaseUrl()}${path}`, {
-        headers,
-        httpsAgent: this.httpsAgent,
-        timeout: this.timeoutMs
-      });
+      response = await axios.get(url, { ...options, headers });
     } catch (error) {
       if (error?.response?.status !== 401 || !token) {
         throw this.describeHttpError(error, `Envoy local API ${path}`);
@@ -131,13 +135,12 @@ export class EnphaseGridClient {
 
       const refreshedToken = await this.refreshEnvoyToken();
       try {
-        response = await axios.get(`${this.getGatewayBaseUrl()}${path}`, {
+        response = await axios.get(url, {
+          ...options,
           headers: {
             ...headers,
             Authorization: `Bearer ${refreshedToken}`
-          },
-          httpsAgent: this.httpsAgent,
-          timeout: this.timeoutMs
+          }
         });
       } catch (retryError) {
         throw this.describeHttpError(retryError, `Envoy local API ${path} after token refresh`);
@@ -246,22 +249,12 @@ export class EnphaseGridClient {
   }
 
   describeHttpError(error, context) {
-    const status = error?.response?.status;
+    const status = error?.response?.status ?? error?.cause?.response?.status;
     if (!status) {
       return error;
     }
 
-    const body = this.summarizeResponseBody(error.response?.data);
-    return new Error(`${context} failed with HTTP ${status}${body ? `: ${body}` : ''}`);
-  }
-
-  summarizeResponseBody(data) {
-    if (data === undefined || data === null) {
-      return '';
-    }
-
-    const text = typeof data === 'string' ? data : JSON.stringify(data);
-    return text.length > 240 ? `${text.slice(0, 240)}...` : text;
+    return new Error(`${context} failed with HTTP ${status}`, { cause: error });
   }
 
   maskSerial(serial) {
@@ -275,11 +268,12 @@ export class EnphaseGridClient {
 
   getGatewayBaseUrl() {
     const host = String(this.gatewayHost || '').trim().replace(/\/+$/, '');
-    if (/^https?:\/\//i.test(host)) {
-      return host;
+    const url = new URL(host.includes('://') ? host : `https://${host}`);
+    if (url.protocol !== 'https:' || url.username || url.password ||
+        url.pathname !== '/' || url.search || url.hash) {
+      throw new Error('gatewayHost must be an HTTPS host with an optional port.');
     }
-
-    return `https://${host}`;
+    return url.origin;
   }
 
   parseRelayState(data) {
@@ -361,7 +355,7 @@ export class EnphaseGridClient {
   }
 
   isUnsupportedEndpointError(error) {
-    const status = error?.response?.status;
+    const status = error?.response?.status ?? error?.cause?.response?.status;
     return status === 404 || status === 405;
   }
 }

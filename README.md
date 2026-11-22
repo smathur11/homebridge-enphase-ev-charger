@@ -140,6 +140,7 @@ Utility Power behavior:
 - polls the local Envoy/IQ Gateway, not the Enphase cloud
 - automatically obtains a local Envoy bearer token from Enlighten's `/entrez-auth-token` endpoint using the configured Enlighten username, password, and gateway serial
 - can reuse the gateway serial auto-discovered from the EV charger summary when it is not entered manually
+- uses HTTPS without following redirects or using an HTTP proxy. Set `gatewayTlsCa` to a PEM certificate or CA obtained from a trusted source and use a `gatewayHost` that matches the certificate to verify gateway identity. Without this setting, existing self-signed gateways remain compatible, but the gateway's identity is unverified.
 - `envoyToken` can still be supplied manually as an optional override/fallback
 - checks local Ensemble/Enpower endpoints such as `/ivp/ensemble/relay`, `/ivp/ensemble/inventory`, and `/ivp/ensemble/status`
 - treats `mains_admin_state: "closed"` as grid available and `mains_admin_state: "open"` as grid unavailable
