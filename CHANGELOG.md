@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.6
+
+- Declare Node.js 26 support.
+
 ## 0.6.5
 
 - Update production dependencies to address npm audit findings.
